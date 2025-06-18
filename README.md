@@ -9,6 +9,7 @@ A Model Context Protocol (MCP) server for Gmail integration in Claude Desktop wi
 ## Features
 
 - Send emails with subject, content, attachments, and recipients
+- **Support for Gmail aliases (send-as addresses) - choose which address to send from**
 - Support for HTML emails and multipart messages with both HTML and plain text versions
 - Full support for international characters in subject lines and email content
 - Read email messages by ID with advanced MIME structure handling
@@ -21,6 +22,7 @@ A Model Context Protocol (MCP) server for Gmail integration in Claude Desktop wi
 - Move emails to different labels/folders
 - Delete emails
 - **Batch operations for efficiently processing multiple emails at once**
+- **List all verified send-as addresses (aliases) for your account**
 - Full integration with Gmail API
 - Simple OAuth2 authentication flow with auto browser launch
 - Support for both Desktop and Web application credentials
@@ -136,6 +138,29 @@ docker run -i --rm \
 }
 ```
 
+To require the from field with Docker:
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "mcp-gmail:/gmail-server",
+        "-e",
+        "GMAIL_CREDENTIALS_PATH=/gmail-server/credentials.json",
+        "-e",
+        "GMAIL_MCP_REQUIRE_FROM=true",
+        "mcp/gmail"
+      ]
+    }
+  }
+}
+```
+
 ### Cloud Server Authentication
 
 For cloud server environments (like n8n), you can specify a custom callback URL during authentication:
@@ -177,16 +202,64 @@ npx @gongrzhe/server-gmail-autoauth-mcp auth https://gmail.gongrzhe.com/oauth2ca
 
 This approach allows authentication flows to work properly in environments where localhost isn't accessible, such as containerized applications or cloud servers.
 
+## Configuration Options
+
+### From Address Requirement
+
+By default, the `from` field in `send_email` and `draft_email` is **optional** and defaults to your primary Gmail account. You can make it required using either:
+
+#### CLI Flag
+```bash
+npx @gongrzhe/server-gmail-autoauth-mcp --require-from
+```
+
+#### Environment Variable
+```bash
+GMAIL_MCP_REQUIRE_FROM=true npx @gongrzhe/server-gmail-autoauth-mcp
+```
+
+#### In Claude Desktop Configuration
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": [
+        "@gongrzhe/server-gmail-autoauth-mcp",
+        "--require-from"
+      ]
+    }
+  }
+}
+```
+
+Or with environment variable:
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": ["@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {
+        "GMAIL_MCP_REQUIRE_FROM": "true"
+      }
+    }
+  }
+}
+```
+
 ## Available Tools
 
 The server provides the following tools that can be used through Claude Desktop:
 
 ### 1. Send Email (`send_email`)
 
-Sends a new email immediately. Supports plain text, HTML, or multipart emails.
+Sends a new email immediately. Supports plain text, HTML, or multipart emails. The `from` field is optional (unless `--require-from` is set) and defaults to your primary Gmail account if not specified.
 
+With explicit from address:
 ```json
 {
+  "from": "myalias@example.com",
   "to": ["recipient@example.com"],
   "subject": "Meeting Tomorrow",
   "body": "Hi,\n\nJust a reminder about our meeting tomorrow at 10 AM.\n\nBest regards",
@@ -194,12 +267,22 @@ Sends a new email immediately. Supports plain text, HTML, or multipart emails.
   "bcc": ["bcc@example.com"],
   "mimeType": "text/plain"
 }
+```
 
+Without from address (uses primary account):
+```json
+{
+  "to": ["recipient@example.com"],
+  "subject": "Meeting Tomorrow",
+  "body": "Hi,\n\nJust a reminder about our meeting tomorrow at 10 AM.\n\nBest regards",
+  "mimeType": "text/plain"
+}
 ```
 HTML Email Example:
 
 ```json
 {
+  "from": "myalias@example.com",
   "to": ["recipient@example.com"],
   "subject": "Meeting Tomorrow",
   "mimeType": "text/html",
@@ -211,6 +294,7 @@ Multipart Email Example (HTML + Plain Text):
 
 ```json
 {
+  "from": "myalias@example.com",
   "to": ["recipient@example.com"],
   "subject": "Meeting Tomorrow",
   "mimeType": "multipart/alternative",
@@ -220,10 +304,11 @@ Multipart Email Example (HTML + Plain Text):
 ```
 
 ### 2. Draft Email (`draft_email`)
-Creates a draft email without sending it.
+Creates a draft email without sending it. The `from` field is optional (unless `--require-from` is set) and defaults to your primary Gmail account if not specified.
 
 ```json
 {
+  "from": "myalias@example.com",
   "to": ["recipient@example.com"],
   "subject": "Draft Report",
   "body": "Here's the draft report for your review.",
@@ -340,6 +425,20 @@ Permanently deletes multiple emails in efficient batches.
   "messageIds": ["182ab45cd67ef", "182ab45cd67eg", "182ab45cd67eh"],
   "batchSize": 50
 }
+```
+
+### 14. List Send-As Addresses (`list_send_as_addresses`)
+Lists all verified send-as addresses (aliases) that can be used as the 'from' address when sending emails.
+
+This tool returns information about each alias including:
+- Email address
+- Display name
+- Whether it's the primary address
+- Whether it's the default address
+- Verification status
+
+```json
+{}
 ```
 
 ## Advanced Search Syntax

@@ -26,6 +26,9 @@ const CONFIG_DIR = path.join(os.homedir(), '.gmail-mcp');
 const OAUTH_PATH = process.env.GMAIL_OAUTH_PATH || path.join(CONFIG_DIR, 'gcp-oauth.keys.json');
 const CREDENTIALS_PATH = process.env.GMAIL_CREDENTIALS_PATH || path.join(CONFIG_DIR, 'credentials.json');
 
+// Configuration for from field requirement
+const REQUIRE_FROM = process.argv.includes('--require-from') || process.env.GMAIL_MCP_REQUIRE_FROM === 'true';
+
 // Type definitions for Gmail API responses
 interface GmailMessagePart {
     partId?: string;
@@ -187,7 +190,8 @@ async function authenticate() {
 }
 
 // Schema definitions
-const SendEmailSchema = z.object({
+// Base schema without from field
+const SendEmailBaseSchema = z.object({
     to: z.array(z.string()).describe("List of recipient email addresses"),
     subject: z.string().describe("Email subject"),
     body: z.string().describe("Email body content (used for text/plain or when htmlBody not provided)"),
@@ -198,6 +202,15 @@ const SendEmailSchema = z.object({
     threadId: z.string().optional().describe("Thread ID to reply to"),
     inReplyTo: z.string().optional().describe("Message ID being replied to"),
 });
+
+// Create schema based on configuration
+const SendEmailSchema = REQUIRE_FROM 
+    ? SendEmailBaseSchema.extend({
+        from: z.string().describe("Sender email address (must be a verified send-as address)")
+    })
+    : SendEmailBaseSchema.extend({
+        from: z.string().optional().describe("Sender email address (must be a verified send-as address). If not provided, defaults to the primary account.")
+    });
 
 const ReadEmailSchema = z.object({
     messageId: z.string().describe("ID of the email message to retrieve"),
@@ -260,6 +273,9 @@ const BatchDeleteEmailsSchema = z.object({
     batchSize: z.number().optional().default(50).describe("Number of messages to process in each batch (default: 50)"),
 });
 
+// New schema for listing send-as addresses
+const ListSendAsAddressesSchema = z.object({}).describe("Retrieves all verified send-as addresses (aliases) for the authenticated user");
+
 // Main function
 async function main() {
     await loadCredentials();
@@ -287,12 +303,16 @@ async function main() {
         tools: [
             {
                 name: "send_email",
-                description: "Sends a new email",
+                description: REQUIRE_FROM 
+                    ? "Sends a new email (from address is required)"
+                    : "Sends a new email (from address is optional, defaults to primary account)",
                 inputSchema: zodToJsonSchema(SendEmailSchema),
             },
             {
                 name: "draft_email",
-                description: "Draft a new email",
+                description: REQUIRE_FROM 
+                    ? "Draft a new email (from address is required)"
+                    : "Draft a new email (from address is optional, defaults to primary account)",
                 inputSchema: zodToJsonSchema(SendEmailSchema),
             },
             {
@@ -350,6 +370,11 @@ async function main() {
                 description: "Gets an existing label by name or creates it if it doesn't exist",
                 inputSchema: zodToJsonSchema(GetOrCreateLabelSchema),
             },
+            {
+                name: "list_send_as_addresses",
+                description: "Lists all verified send-as addresses (aliases) that can be used as the 'from' address when sending emails",
+                inputSchema: zodToJsonSchema(ListSendAsAddressesSchema),
+            },
         ],
     }))
 
@@ -357,6 +382,27 @@ async function main() {
         const { name, arguments: args } = request.params;
 
         async function handleEmailAction(action: "send" | "draft", validatedArgs: any) {
+            // Set default from address if not provided
+            if (!validatedArgs.from) {
+                validatedArgs.from = 'me';
+            }
+            
+            // If a from address is provided (not 'me'), validate it
+            if (validatedArgs.from !== 'me') {
+                const sendAsResponse = await gmail.users.settings.sendAs.list({
+                    userId: 'me',
+                });
+                
+                const sendAsAddresses = sendAsResponse.data.sendAs || [];
+                const verifiedAddresses = sendAsAddresses
+                    .filter((sendAs: any) => sendAs.verificationStatus === 'accepted')
+                    .map((sendAs: any) => sendAs.sendAsEmail.toLowerCase());
+                
+                if (!verifiedAddresses.includes(validatedArgs.from.toLowerCase())) {
+                    throw new Error(`The 'from' address '${validatedArgs.from}' is not a verified send-as address. Use 'list_send_as_addresses' to see available addresses.`);
+                }
+            }
+
             const message = createEmailMessage(validatedArgs);
 
             const encodedMessage = Buffer.from(message).toString('base64')
@@ -796,6 +842,41 @@ async function main() {
                             {
                                 type: "text",
                                 text: `Successfully ${action} label:\nID: ${result.id}\nName: ${result.name}\nType: ${result.type}`,
+                            },
+                        ],
+                    };
+                }
+
+                case "list_send_as_addresses": {
+                    // List all send-as addresses (aliases)
+                    const response = await gmail.users.settings.sendAs.list({
+                        userId: 'me',
+                    });
+
+                    const sendAsAddresses = response.data.sendAs || [];
+                    
+                    // Format the results
+                    const results = sendAsAddresses.map((sendAs: any) => {
+                        const parts = [];
+                        parts.push(`Email: ${sendAs.sendAsEmail}`);
+                        if (sendAs.displayName) {
+                            parts.push(`Display Name: ${sendAs.displayName}`);
+                        }
+                        if (sendAs.replyToAddress) {
+                            parts.push(`Reply-To: ${sendAs.replyToAddress}`);
+                        }
+                        parts.push(`Primary: ${sendAs.isPrimary || false}`);
+                        parts.push(`Default: ${sendAs.isDefault || false}`);
+                        parts.push(`Verified: ${sendAs.verificationStatus === 'accepted'}`);
+                        
+                        return parts.join('\n');
+                    });
+
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Found ${sendAsAddresses.length} send-as address(es):\n\n${results.join('\n\n')}`,
                             },
                         ],
                     };

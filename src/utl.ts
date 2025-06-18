@@ -30,6 +30,11 @@ export function createEmailMessage(validatedArgs: any): string {
     // Generate a random boundary string for multipart messages
     const boundary = `----=_NextPart_${Math.random().toString(36).substring(2)}`;
 
+    // Validate from email address (skip validation for 'me' which is a special Gmail API value)
+    if (validatedArgs.from !== 'me' && !validateEmail(validatedArgs.from)) {
+        throw new Error(`Sender email address is invalid: ${validatedArgs.from}`);
+    }
+
     // Validate email addresses
     (validatedArgs.to as string[]).forEach(email => {
         if (!validateEmail(email)) {
@@ -39,7 +44,7 @@ export function createEmailMessage(validatedArgs: any): string {
 
     // Common email headers
     const emailParts = [
-        'From: me',
+        `From: ${validatedArgs.from}`,
         `To: ${validatedArgs.to.join(', ')}`,
         validatedArgs.cc ? `Cc: ${validatedArgs.cc.join(', ')}` : '',
         validatedArgs.bcc ? `Bcc: ${validatedArgs.bcc.join(', ')}` : '',
