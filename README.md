@@ -117,6 +117,18 @@ docker run -i --rm \
   mcp/gmail auth
 ```
 
+To use a custom port with Docker:
+```bash
+docker run -i --rm \
+  --mount type=bind,source=/path/to/gcp-oauth.keys.json,target=/gcp-oauth.keys.json \
+  -v mcp-gmail:/gmail-server \
+  -e GMAIL_OAUTH_PATH=/gcp-oauth.keys.json \
+  -e "GMAIL_CREDENTIALS_PATH=/gmail-server/credentials.json" \
+  -e GMAIL_MCP_AUTH_PORT=8080 \
+  -p 8080:8080 \
+  mcp/gmail auth
+```
+
 2. Usage:
 ```json
 {
@@ -203,6 +215,22 @@ npx @gongrzhe/server-gmail-autoauth-mcp auth https://gmail.gongrzhe.com/oauth2ca
 This approach allows authentication flows to work properly in environments where localhost isn't accessible, such as containerized applications or cloud servers.
 
 ## Configuration Options
+
+### Authentication Server Port
+
+By default, the OAuth authentication server runs on port 3000. You can configure a different port using either:
+
+#### CLI Flag
+```bash
+npx @gongrzhe/server-gmail-autoauth-mcp auth --port 8080
+```
+
+#### Environment Variable
+```bash
+GMAIL_MCP_AUTH_PORT=8080 npx @gongrzhe/server-gmail-autoauth-mcp auth
+```
+
+**Note**: Make sure the port you choose matches the redirect URI configured in your Google Cloud Console (e.g., `http://localhost:8080/oauth2callback`).
 
 ### From Address Requirement
 
@@ -523,8 +551,13 @@ The server includes efficient batch processing capabilities:
    - For web applications, verify the redirect URI is correctly configured
 
 3. **Port Already in Use**
-   - If port 3000 is already in use, please free it up before running authentication
-   - You can find and stop the process using that port
+   - If the default port (3000) is already in use, you can specify a different port:
+     ```bash
+     npx @gongrzhe/server-gmail-autoauth-mcp auth --port 8080
+     # or
+     GMAIL_MCP_AUTH_PORT=8080 npx @gongrzhe/server-gmail-autoauth-mcp auth
+     ```
+   - Remember to update your Google Cloud Console redirect URI to match the new port
 
 4. **Batch Operation Failures**
    - If batch operations fail, they automatically retry individual items

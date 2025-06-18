@@ -29,6 +29,29 @@ const CREDENTIALS_PATH = process.env.GMAIL_CREDENTIALS_PATH || path.join(CONFIG_
 // Configuration for from field requirement
 const REQUIRE_FROM = process.argv.includes('--require-from') || process.env.GMAIL_MCP_REQUIRE_FROM === 'true';
 
+// Configuration for OAuth server port
+const DEFAULT_PORT = 3000;
+const AUTH_PORT = (() => {
+    // Check for --port CLI argument
+    const portArgIndex = process.argv.indexOf('--port');
+    if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+        const port = parseInt(process.argv[portArgIndex + 1], 10);
+        if (!isNaN(port) && port > 0 && port < 65536) {
+            return port;
+        }
+    }
+    
+    // Check for environment variable
+    if (process.env.GMAIL_MCP_AUTH_PORT) {
+        const port = parseInt(process.env.GMAIL_MCP_AUTH_PORT, 10);
+        if (!isNaN(port) && port > 0 && port < 65536) {
+            return port;
+        }
+    }
+    
+    return DEFAULT_PORT;
+})();
+
 // Type definitions for Gmail API responses
 interface GmailMessagePart {
     partId?: string;
@@ -127,7 +150,7 @@ async function loadCredentials() {
 
         const callback = process.argv[2] === 'auth' && process.argv[3] 
         ? process.argv[3] 
-        : "http://localhost:3000/oauth2callback";
+        : `http://localhost:${AUTH_PORT}/oauth2callback`;
 
         oauth2Client = new OAuth2Client(
             keys.client_id,
@@ -147,7 +170,7 @@ async function loadCredentials() {
 
 async function authenticate() {
     const server = http.createServer();
-    server.listen(3000);
+    server.listen(AUTH_PORT);
 
     return new Promise<void>((resolve, reject) => {
         const authUrl = oauth2Client.generateAuthUrl({
@@ -155,13 +178,14 @@ async function authenticate() {
             scope: ['https://www.googleapis.com/auth/gmail.modify'],
         });
 
+        console.log(`OAuth server listening on port ${AUTH_PORT}`);
         console.log('Please visit this URL to authenticate:', authUrl);
         open(authUrl);
 
         server.on('request', async (req, res) => {
             if (!req.url?.startsWith('/oauth2callback')) return;
 
-            const url = new URL(req.url, 'http://localhost:3000');
+            const url = new URL(req.url, `http://localhost:${AUTH_PORT}`);
             const code = url.searchParams.get('code');
 
             if (!code) {
